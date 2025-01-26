@@ -1,0 +1,3 @@
+
+test:
+	go run github.com/onsi/ginkgo/v2/ginkgo -r -v --randomize-all --randomize-suites ./...
