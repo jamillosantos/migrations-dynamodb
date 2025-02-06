@@ -66,15 +66,7 @@ func (t *Target) Current(ctx context.Context) (string, error) {
 
 // Create will create the migrations table and the migrations lock table in the DynamoDB.
 func (t *Target) Create(ctx context.Context) error {
-	listTableResponse, err := t.client.ListTables(ctx, &dynamodb.ListTablesInput{})
-	if err != nil {
-		return fmt.Errorf("failed to list tables: %w", err)
-	}
-
-	tables := make(map[string]struct{})
-	for _, tableName := range listTableResponse.TableNames {
-		tables[tableName] = struct{}{}
-	}
+	tables, _ := t.generateTablesMap(ctx)
 
 	if _, ok := tables[t.tableName]; !ok {
 		_, err := t.client.CreateTable(ctx, &dynamodb.CreateTableInput{
@@ -101,8 +93,29 @@ func (t *Target) Create(ctx context.Context) error {
 		}
 	}
 
+	if err := t.createLockTable(ctx, tables); err != nil {
+		return err
+	}
+
+	return nil
+}
+
+func (t *Target) generateTablesMap(ctx context.Context) (map[string]struct{}, error) {
+	listTableResponse, err := t.client.ListTables(ctx, &dynamodb.ListTablesInput{})
+	if err != nil {
+		return nil, fmt.Errorf("failed to list tables: %w", err)
+	}
+
+	tables := make(map[string]struct{})
+	for _, tableName := range listTableResponse.TableNames {
+		tables[tableName] = struct{}{}
+	}
+	return tables, nil
+}
+
+func (t *Target) createLockTable(ctx context.Context, tables map[string]struct{}) error {
 	if _, ok := tables[t.lockTableName]; !ok {
-		_, err = t.client.CreateTable(ctx, &dynamodb.CreateTableInput{
+		_, err := t.client.CreateTable(ctx, &dynamodb.CreateTableInput{
 			TableName: &t.lockTableName,
 			AttributeDefinitions: []types.AttributeDefinition{
 				{
@@ -268,6 +281,16 @@ func (t *Target) StartMigration(ctx context.Context, id string) error {
 }
 
 func (t *Target) Lock(ctx context.Context) (migrations.Unlocker, error) {
+	tables, err := t.generateTablesMap(ctx)
+	if err != nil {
+		return nil, err
+	}
+
+	err = t.createLockTable(ctx, tables)
+	if err != nil {
+		return nil, err
+	}
+
 	for {
 		_, err := t.client.PutItem(context.WithoutCancel(ctx), &dynamodb.PutItemInput{
 			TableName: &t.lockTableName,
