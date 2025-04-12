@@ -302,6 +302,37 @@ var _ = Describe("Current", func() {
 			Expect(target.Create(ctx)).To(Succeed())
 		})
 
+		When("locking the migration", Ordered, func() {
+			var u migrations.Unlocker
+			It("should add the record to the dynamodb table", func() {
+				var err error
+				u, err = target.Lock(ctx)
+				Expect(err).ToNot(HaveOccurred())
+
+				scanOutput, err := dynamoDBClient.Scan(ctx, &dynamodb.ScanInput{
+					TableName: aws.String("_migrations-lock"),
+				})
+				Expect(err).ToNot(HaveOccurred())
+				Expect(scanOutput.Count).To(Equal(int32(1)))
+				Expect(scanOutput.Items).To(HaveLen(1))
+				Expect(scanOutput.Items[0]).To(HaveKeyWithValue("id", &types.AttributeValueMemberS{
+					Value: "migrations",
+				}))
+			})
+
+			It("should remove the record from the table", func() {
+				err := u.Unlock(ctx)
+				Expect(err).ToNot(HaveOccurred())
+
+				scanOutput, err := dynamoDBClient.Scan(ctx, &dynamodb.ScanInput{
+					TableName: aws.String("_migrations-lock"),
+				})
+				Expect(err).ToNot(HaveOccurred())
+				Expect(scanOutput.Count).To(Equal(int32(0)))
+				Expect(scanOutput.Items).To(HaveLen(0))
+			})
+		})
+
 		When("there is no dirty migrations", func() {
 			It("should return the list of migration finished", func() {
 				parallelCounter := 0
